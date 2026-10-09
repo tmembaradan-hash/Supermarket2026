@@ -1,6 +1,14 @@
 'use strict';
 const $=s=>document.querySelector(s), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=n=>Number(n||0).toLocaleString('en-US',{maximumFractionDigits:3}), cash=n=>number(n)+' ل.س';
+const englishDigits=v=>String(v).replace(/[٠-٩]/g,c=>String(c.charCodeAt(0)-1632)).replace(/[۰-۹]/g,c=>String(c.charCodeAt(0)-1776)).replace(/٫/g,'.').replace(/٬/g,'');
+function numericAttrs(decimal=false){return `type="text" lang="en" dir="ltr" data-numeric inputmode="${decimal?'decimal':'numeric'}" pattern="${decimal?'[0-9]+([.][0-9]{1,3})?':'[0-9]+'}" title="${decimal?'أدخل أرقاماً إنجليزية؛ استخدم النقطة للكسور، حتى 3 منازل':'أدخل مبلغاً صحيحاً بالأرقام الإنجليزية'}" autocomplete="off"`;}
+// Capture runs before the field's calculation listeners, including pasted Arabic digits.
+document.addEventListener('input',e=>{
+  const el=e.target;
+  if(!(el instanceof HTMLInputElement)||!el.matches('[data-numeric],[name=barcode],input[type=tel],#item-query,#product-search,#party-search'))return;
+  const value=englishDigits(el.value);if(value!==el.value){const start=el.selectionStart,end=el.selectionEnd;el.value=value;try{el.setSelectionRange(start,end);}catch(_){}}
+},true);
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Damascus',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const uid=()=>crypto.randomUUID(), clone=x=>JSON.parse(JSON.stringify(x));
 let state=Market.state([]), demo=false, demoEvents=[], token='', route='home', invoiceKind='sale',cart=[], bridge=null, busy=false, scan=null, scanCallback=null;
@@ -11,7 +19,11 @@ let reportType='docs',reportParty='',reportFrom='',reportTo=today(),reportKind='
 function toast(t,error=false){const e=$('#toast');e.textContent=t;e.className=error?'error':'';e.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.style.display='none',6500);}
 function opts(items,selected=''){return items.map(([v,t])=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(t)}</option>`).join('');}
 function partyOpts(type='',empty='بدون حساب — حركة عامة',selected=''){return opts([['',empty],...Object.values(state.parties).filter(p=>!type||p.type===type).map(p=>[p.id,p.name])],selected);}
-function field(label,name,value='',type='text',extra=''){return `<label>${label}<input name="${name}" type="${type}" value="${esc(value)}" ${extra}></label>`;}
+function field(label,name,value='',type='text',extra=''){
+  const numeric=type==='number',attrs=numeric?numericAttrs(extra.includes('0.001')):`type="${type}"${type==='date'||type==='tel'?' lang="en" dir="ltr"':''}`;
+  const shown=numeric&&Number(value)===0?'':value;
+  return `<label>${label}<input name="${name}" ${attrs} value="${esc(shown)}" ${extra}></label>`;
+}
 function modal(title,html){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;$('#modal').showModal();}
 function empty(t){return `<div class="empty">${t}</div>`;}
 function balanceLabel(n){return n>0?'لنا':n<0?'علينا':'مسدد';}
@@ -73,7 +85,7 @@ function seedDemo(){
 }
 function enter(){
   $('#gate').hidden=true;$('#shell').hidden=false;$('#demo-banner').hidden=!demo;$('#connection').textContent=demo?'نسخة تجريبية':'متصل بجوجل شيت';
-  $('#today').textContent=new Intl.DateTimeFormat('ar-SY',{dateStyle:'full',timeZone:'Asia/Damascus'}).format(new Date());
+  $('#today').textContent=new Intl.DateTimeFormat('ar-SY-u-nu-latn',{dateStyle:'full',timeZone:'Asia/Damascus'}).format(new Date());
   ['desktop-nav','mobile-nav'].forEach(id=>{$('#'+id).innerHTML=routes.map(([r,icon,t])=>`<a href="#${r}" data-route="${r}"><span>${icon}</span><span>${t}</span></a>`).join('');});
   pendingBanner();navigate(location.hash.slice(1)||'home');
 }
@@ -97,7 +109,7 @@ function renderProducts(){
 function productList(q){const list=Object.values(state.products).filter(p=>p.name.includes(q)||p.barcode.includes(q));$('#product-list').innerHTML=list.length?`<div class="table-wrap"><table><thead><tr><th>المنتج</th><th>الباركود</th><th>المتوفر</th><th>سعر البيع</th><th>تكلفة مرجعية</th><th></th></tr></thead><tbody>${list.map(p=>`<tr><td class="product-name"><b>${esc(p.name)}</b><small class="muted">${esc(p.unit)}</small></td><td dir="ltr">${esc(p.barcode||'—')}</td><td><span class="badge ${p.stock<=p.minStock?'warn':''}">${number(p.stock)}</span></td><td>${cash(p.price)}</td><td>${cash(p.cost)}</td><td><button data-a="product" data-id="${p.id}">تعديل</button></td></tr>`).join('')}</tbody></table></div>`:empty('لا توجد منتجات مطابقة. أضف أول منتج من الزر أعلاه.');}
 function productForm(id='',barcode=''){
   const p=state.products[id]||{name:'',barcode,unit:'قطعة',price:0,cost:0,minStock:0,openingQty:0};
-  modal(id?'تعديل المنتج':'إضافة منتج',`<form id="product-form" data-id="${esc(id)}"><div class="form-grid"><div class="wide">${field('اسم المنتج','name',p.name,'text','required maxlength="160"')}</div><label class="wide">الباركود<div class="inline"><input name="barcode" value="${esc(p.barcode)}" maxlength="100" dir="ltr"><button type="button" data-a="product-scan">▥ كاميرا</button></div></label>${field('الوحدة','unit',p.unit,'text','required maxlength="30"')}${field('سعر البيع — ل.س','price',p.price,'number','required min="0" step="1"')}${field('تكلفة مرجعية — ل.س','cost',p.cost,'number','required min="0" step="1"')}${field('حد تنبيه المخزون','minStock',p.minStock,'number','min="0" step="0.001"')}${!id?field('كمية افتتاحية موجودة فعلاً','openingQty',0,'number','min="0" step="0.001"'):''}</div><p class="hint">الباركود نص للحفاظ على الأصفار في بدايته. تغيير المخزون لاحقاً يتم من الفواتير. التكلفة المرجعية لتعبئة الشراء وليست حساباً للأرباح.</p><div class="error-text" id="form-error"></div><div class="form-actions"><button type="submit" class="primary">حفظ المنتج</button></div></form>`);
+  modal(id?'تعديل المنتج':'إضافة منتج',`<form id="product-form" data-id="${esc(id)}"><div class="form-grid"><div class="wide">${field('اسم المنتج','name',p.name,'text','required maxlength="160"')}</div><label class="wide">الباركود<div class="inline"><input name="barcode" lang="en" value="${esc(p.barcode)}" maxlength="100" dir="ltr"><button type="button" data-a="product-scan">▥ كاميرا</button></div></label>${field('الوحدة','unit',p.unit,'text','required maxlength="30"')}${field('سعر البيع — ل.س','price',p.price,'number','required min="0" step="1"')}${field('تكلفة مرجعية — ل.س','cost',p.cost,'number','required min="0" step="1"')}${field('حد تنبيه المخزون','minStock',p.minStock,'number','min="0" step="0.001"')}${!id?field('كمية افتتاحية موجودة فعلاً','openingQty',0,'number','min="0" step="0.001"'):''}</div><p class="hint">الباركود نص للحفاظ على الأصفار في بدايته. تغيير المخزون لاحقاً يتم من الفواتير. التكلفة المرجعية لتعبئة الشراء وليست حساباً للأرباح.</p><div class="error-text" id="form-error"></div><div class="form-actions"><button type="submit" class="primary">حفظ المنتج</button></div></form>`);
 }
 function renderParties(){
   $('#main').innerHTML=`<div class="toolbar"><input id="party-search" placeholder="اسم الحساب أو الهاتف…" aria-label="البحث في الحسابات"><select id="party-type" aria-label="نوع الحساب">${opts([['','الكل'],['customer','الزبائن'],['supplier','الموردون']])}</select><button class="primary" data-a="party">+ حساب</button></div><div id="party-list" class="card table-card"></div>`;
@@ -110,23 +122,23 @@ function partyForm(id=''){
 }
 function renderInvoice(){
   const sale=invoiceKind==='sale';
-  $('#main').innerHTML=`<div class="pill-tabs"><button data-a="invoice-type" data-kind="sale" class="${sale?'active':''}">فاتورة بيع</button><button data-a="invoice-type" data-kind="purchase" class="${!sale?'active':''}">فاتورة شراء</button></div><form id="invoice-form"><div class="invoice-layout"><section class="card"><div class="section-head"><h2>أضف المنتجات</h2><span class="muted">بالاسم أو الباركود</span></div><div class="inline"><input id="item-query" placeholder="اكتب الاسم أو امسح الباركود" autocomplete="off"><button type="button" data-a="invoice-scan" class="primary">▥ مسح</button></div><div class="results" id="item-results"></div><div id="cart"></div></section><section class="card invoice-summary"><h2>ملخص الفاتورة</h2><label>${sale?'الزبون':'المورد'}<select name="partyId" ${!sale?'required':''}>${partyOpts(sale?'customer':'supplier',sale?'زبون نقدي — بدون حساب':'اختر المورد')}</select></label>${field('تاريخ الفاتورة','date',today(),'date',`required max="${today()}"`)}<div class="totals-row"><span>قبل الخصم</span><b id="gross">0 ل.س</b></div>${field('خصم على الفاتورة — ل.س','discount',0,'number','min="0" step="1" required')}<div class="totals-row big"><span>الإجمالي</span><span id="total">0</span></div><label>طريقة التسديد<select id="pay-mode">${opts([['cash','نقدي بالكامل'],['partial','دفعة جزئية / آجل']])}</select></label>${field(sale?'المقبوض الآن — ل.س':'المدفوع الآن — ل.س','paid',0,'number','min="0" step="1" required readonly')}<div class="totals-row"><span>متبقي على الحساب</span><b id="remaining">0 ل.س</b></div>${field('ملاحظات (اختياري)','note','','text','maxlength="500"')}<div class="error-text" id="invoice-error"></div><button class="primary full" type="submit" style="margin-top:18px">اعتماد وحفظ الفاتورة</button><p class="hint">الحفظ يُحدّث المخزون والصندوق والحساب معاً.</p></section></div></form>`;
+  $('#main').innerHTML=`<div class="pill-tabs"><button data-a="invoice-type" data-kind="sale" class="${sale?'active':''}">فاتورة بيع</button><button data-a="invoice-type" data-kind="purchase" class="${!sale?'active':''}">فاتورة شراء</button></div><form id="invoice-form"><div class="invoice-layout"><section class="card"><div class="section-head"><h2>أضف المنتجات</h2><span class="muted">بالاسم أو الباركود</span></div><div class="inline"><input id="item-query" placeholder="اكتب الاسم أو امسح الباركود" autocomplete="off"><button type="button" data-a="invoice-scan" class="primary">▥ مسح</button></div><div class="results" id="item-results"></div><div id="cart"></div></section><section class="card invoice-summary"><h2>ملخص الفاتورة</h2><label>${sale?'الزبون':'المورد'}<select name="partyId" ${!sale?'required':''}>${partyOpts(sale?'customer':'supplier',sale?'زبون نقدي — بدون حساب':'اختر المورد')}</select></label>${field('تاريخ الفاتورة','date',today(),'date',`required max="${today()}"`)}<div class="totals-row"><span>قبل الخصم</span><b id="gross">0 ل.س</b></div>${field('خصم على الفاتورة — ل.س','discount',0,'number','min="0" step="1"')}<div class="totals-row big"><span>الإجمالي</span><span id="total">0</span></div><label>طريقة التسديد<select id="pay-mode">${opts([['cash','نقدي بالكامل'],['partial','دفعة جزئية / آجل']])}</select></label>${field(sale?'المقبوض الآن — ل.س':'المدفوع الآن — ل.س','paid',0,'number','min="0" step="1" readonly')}<div class="totals-row"><span>متبقي على الحساب</span><b id="remaining">0 ل.س</b></div>${field('ملاحظات (اختياري)','note','','text','maxlength="500"')}<div class="error-text" id="invoice-error"></div><button class="primary full" type="submit" style="margin-top:18px">اعتماد وحفظ الفاتورة</button><p class="hint">الحفظ يُحدّث المخزون والصندوق والحساب معاً.</p></section></div></form>`;
   $('#item-query').addEventListener('input',e=>itemResults(e.target.value));
   $('#item-query').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();lookupBarcode(e.target.value);}});
   $('#invoice-form [name=discount]').oninput=invoiceTotals;
   $('#invoice-form [name=paid]').oninput=invoiceTotals;
-  $('#pay-mode').onchange=()=>{const p=$('#invoice-form [name=paid]');p.readOnly=$('#pay-mode').value==='cash';if(!p.readOnly)p.value=0;invoiceTotals();};Object.entries(invoiceDraft).forEach(([k,v])=>{const el=$('#invoice-form [name=\"'+k+'\"]');if(el)el.value=v;});if(invoiceDraft.payMode){$('#pay-mode').value=invoiceDraft.payMode;$('#invoice-form [name=paid]').readOnly=invoiceDraft.payMode==='cash';}renderCart();
+  $('#pay-mode').onchange=()=>{const p=$('#invoice-form [name=paid]');p.readOnly=$('#pay-mode').value==='cash';if(!p.readOnly)p.value='';invoiceTotals();};Object.entries(invoiceDraft).forEach(([k,v])=>{const el=$('#invoice-form [name=\"'+k+'\"]');if(el)el.value=v;});if(invoiceDraft.payMode){$('#pay-mode').value=invoiceDraft.payMode;$('#invoice-form [name=paid]').readOnly=invoiceDraft.payMode==='cash';}renderCart();
 }
 function itemResults(q){$('#item-results').innerHTML=q?Object.values(state.products).filter(p=>p.name.includes(q)||p.barcode.includes(q)).slice(0,8).map(p=>`<button type="button" data-a="add-item" data-id="${p.id}"><span>${esc(p.name)}<small class="muted">المتوفر: ${number(p.stock)}</small></span><b>${cash(invoiceKind==='sale'?p.price:p.cost)}</b></button>`).join(''):'';}
 function addItem(id){const p=state.products[id];if(!p)return;const l=cart.find(x=>x.productId===id);if(l)l.qty=Market.qty(l.qty+1);else cart.push({productId:id,qty:1,price:invoiceKind==='sale'?p.price:p.cost});$('#item-query').value='';$('#item-results').innerHTML='';renderCart();}
-function lookupBarcode(code){const p=Object.values(state.products).find(p=>p.barcode===String(code).trim());if(p)addItem(p.id);else toast('الباركود غير مسجل. أضف المنتج أولاً من المنتجات.',true);}
+function lookupBarcode(code){const p=Object.values(state.products).find(p=>p.barcode===englishDigits(code).trim());if(p)addItem(p.id);else toast('الباركود غير مسجل. أضف المنتج أولاً من المنتجات.',true);}
 function renderCart(){
-  $('#cart').innerHTML=cart.length?cart.map((l,i)=>`<div class="cart-row"><div><b>${esc(state.products[l.productId].name)}</b><small>${cash(Math.round(l.qty*l.price))}</small></div><label>الكمية<input type="number" data-cart="qty" data-index="${i}" value="${l.qty}" min="0.001" step="0.001" required></label><label>سعر الوحدة<input type="number" data-cart="price" data-index="${i}" value="${l.price}" min="0" step="1" required></label><button type="button" data-a="remove-item" data-index="${i}" aria-label="حذف البند">×</button></div>`).join(''):empty('الفاتورة فارغة.<br>امسح باركود المنتج أو ابحث عنه لإضافته.');
+  $('#cart').innerHTML=cart.length?cart.map((l,i)=>`<div class="cart-row"><div><b>${esc(state.products[l.productId].name)}</b><small>${cash(Math.round(l.qty*l.price))}</small></div><label>الكمية<input ${numericAttrs(true)} data-cart="qty" data-index="${i}" value="${l.qty||''}" min="0.001" step="0.001" required></label><label>سعر الوحدة<input ${numericAttrs()} data-cart="price" data-index="${i}" value="${l.price||''}" min="0" step="1" required></label><button type="button" data-a="remove-item" data-index="${i}" aria-label="حذف البند">×</button></div>`).join(''):empty('الفاتورة فارغة.<br>امسح باركود المنتج أو ابحث عنه لإضافته.');
   document.querySelectorAll('[data-cart]').forEach(input=>input.addEventListener('input',e=>{const i=Number(e.target.dataset.index);cart[i][e.target.dataset.cart]=Number(e.target.value);e.target.closest('.cart-row').querySelector('small').textContent=cash(Math.round(cart[i].qty*cart[i].price));invoiceTotals();}));invoiceTotals();
 }
 function invoiceTotals(){
   const gross=cart.reduce((a,l)=>a+Math.round(l.qty*l.price),0), discount=Number($('#invoice-form [name=discount]').value)||0,total=gross-discount;
-  if($('#pay-mode').value==='cash')$('#invoice-form [name=paid]').value=Math.max(total,0);
+  if($('#pay-mode').value==='cash')$('#invoice-form [name=paid]').value=Math.max(total,0)||'';
   $('#gross').textContent=cash(gross);$('#total').textContent=cash(total);$('#remaining').textContent=cash(total-Number($('#invoice-form [name=paid]').value||0));
 }
 function voucherForm(kind){
@@ -199,7 +211,7 @@ document.addEventListener('click',async e=>{
     if(a==='add-item')addItem(id);
     if(a==='remove-item'){cart.splice(Number(b.dataset.index),1);renderCart();}
     if(a==='invoice-scan')await openScanner(lookupBarcode);
-    if(a==='product-scan')await openScanner(code=>{$('#product-form [name=barcode]').value=code;});
+    if(a==='product-scan')await openScanner(code=>{$('#product-form [name=barcode]').value=englishDigits(code);});
     if(a==='search-scan')await openScanner(code=>{$('#product-search').value=code;productList(code);});
     if(a==='statement'){reportType='statement';reportParty=id;location.hash='reports';if(route==='reports')renderReports();}
     if(a==='report-type'){reportType=kind;renderReports();}
