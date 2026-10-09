@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#125b4f"><meta name="referrer" content="no-referrer">
+<title>متجري | إدارة السوبر ماركت</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="style.css">
+<script src="config.js" defer></script><script src="engine.js" defer></script><script src="app.js" defer></script>
+</head><body>
+<section id="gate" class="gate"><div class="login-card"><div class="brand-mark">م</div><span class="eyebrow">إدارة يومك، من شاشة واحدة</span><h1>أهلاً في متجري</h1><p>مبيعاتك، بضاعتك وحساباتك.<br>مرتّبة معك أينما كنت.</p>
+<form id="login-form"><label>رابط الربط مع Google <input id="script-url" type="url" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" required></label><label>كلمة المرور<input id="password" type="password" autocomplete="current-password" required minlength="16"></label><button class="primary full" id="login-btn">دخول المتجر ←</button></form>
+<div class="divider">أو اكتشف الواجهة أولاً</div><button id="demo-btn" class="secondary full">فتح النسخة التجريبية</button><p class="fine">النسخة التجريبية مستقلة تماماً عن حسابات متجرك.</p><p id="login-status" role="status"></p></div></section>
+<div id="shell" hidden><aside class="sidebar"><a href="#home" class="brand"><span class="brand-mark small">م</span><span>متجري<small>نظام السوبر ماركت</small></span></a><nav id="desktop-nav"></nav><div class="side-foot"><span class="currency">ل.س</span> العملة: ليرة سورية<small>مساحة عمل مبسطة لمتجرك</small></div></aside>
+<div class="workspace"><header class="topbar"><div><span class="eyebrow" id="today"></span><h1 id="page-title">نظرة عامة</h1></div><div class="header-actions"><span id="connection" class="badge">متصل</span><button id="refresh-btn" class="icon-btn" title="تحديث البيانات" aria-label="تحديث البيانات">↻</button></div></header><div id="demo-banner" class="notice" hidden>وضع تجريبي · البيانات على هذا الجهاز فقط، ولا تسجّل في Google Sheets.</div><div id="pending-banner" class="notice" hidden></div><main id="main"></main></div><nav id="mobile-nav" class="mobile-nav"></nav></div>
+<dialog id="modal"><div class="dialog-head"><h2 id="modal-title"></h2><button class="icon-btn" id="close-modal" aria-label="إغلاق">×</button></div><div id="modal-body"></div></dialog>
+<dialog id="scanner-modal"><div class="dialog-head"><h2>وجّه الكاميرا إلى الباركود</h2><button class="icon-btn" id="close-scanner" aria-label="إغلاق الكاميرا">×</button></div><div id="reader"></div><p class="muted">أبعد الهاتف قليلاً وتأكد من وضوح الأشرطة والإضاءة.</p><label class="secondary file-label">أو اختر صورة الباركود<input id="barcode-file" type="file" accept="image/*" hidden></label><p id="scanner-status" role="status"></p></dialog>
+<div id="toast" role="status" aria-live="polite"></div><div id="print-area"></div>
+</body></html>
