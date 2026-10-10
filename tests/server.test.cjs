@@ -1,0 +1,24 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),crypto=require('node:crypto');
+const props=new Map(),cache=new Map(),rows=[];let locked=false,flushFailure=false,appendFailure=false;
+const sheet={getLastRow:()=>rows.length+1,getRange:()=>({getValues:()=>rows.map(e=>[e[4]])}),appendRow:r=>{rows.push(r);if(appendFailure){appendFailure=false;throw Error('ambiguous append');}}};
+const ctx={console,Date,JSON,Utilities:{getUuid:()=>crypto.randomUUID(),DigestAlgorithm:{SHA_256:'sha256'},computeDigest:(_,x)=>Array.from(crypto.createHash('sha256').update(x).digest()),formatDate:()=> '2026-10-09'},PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k)||null,setProperties:o=>Object.entries(o).forEach(([k,v])=>props.set(k,v))})},CacheService:{getScriptCache:()=>({get:k=>cache.get(k)||null,put:(k,v)=>cache.set(k,v),remove:k=>cache.delete(k)})},LockService:{getScriptLock:()=>({waitLock:()=>{assert.equal(locked,false);locked=true;},releaseLock:()=>{locked=false;}})},SpreadsheetApp:{openById:()=>({getSheetByName:()=>sheet}),flush:()=>{if(flushFailure){flushFailure=false;throw Error('flush network error');}}}};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/../engine.js','utf8'),ctx);vm.runInContext(fs.readFileSync(__dirname+'/../apps-script/Code.gs','utf8'),ctx);
+props.set('PASSWORD_SALT','salt');props.set('PASSWORD_HASH',ctx.hash_('saltcorrect-long-password'));props.set('AUTH_VERSION','v1');ctx.views_=()=>{};
+assert.equal(ctx.callApi({action:'snapshot'}).ok,false);
+assert.equal(ctx.callApi({action:'login',username:'admin',password:'bad'}).ok,false);
+assert.equal(ctx.callApi({action:'login',username:'someone',password:'correct-long-password'}).ok,false);
+assert.equal(ctx.callApi({action:'login',password:'correct-long-password'}).ok,false);
+const login=ctx.callApi({action:'login',username:'admin',password:'correct-long-password'});assert.ok(login.ok);assert.equal(login.serverVersion,2);const token=login.token;
+function commit(kind,data){const request={kind,data,id:crypto.randomUUID(),date:'2026-10-09'};return {request,result:ctx.callApi({action:'commit',token,request})};}
+const a=commit('opening',{amount:1000000});assert.ok(a.result.ok);assert.equal(rows.length,1);
+const retry=ctx.callApi({action:'commit',token,request:a.request});assert.ok(retry.duplicate);assert.equal(rows.length,1);assert.equal(retry.state.cash,1000000);
+flushFailure=true;const b=commit('receipt',{amount:100,note:'test'});assert.equal(b.result.ok,false);assert.equal(b.result.uncertain,true);assert.equal(rows.length,2);
+assert.ok(ctx.callApi({action:'commit',token,request:b.request}).duplicate);assert.equal(rows.length,2);
+appendFailure=true;const c=commit('receipt',{amount:200,note:'test'});assert.equal(c.result.uncertain,true);assert.ok(ctx.callApi({action:'commit',token,request:c.request}).duplicate);assert.equal(rows.length,3);
+ctx.views_=()=>{throw Error('projection unavailable');};const d=commit('receipt',{amount:300,note:'test'});assert.ok(d.result.ok);assert.ok(d.result.warning);assert.equal(d.result.state.cash,1000600);
+assert.equal(ctx.callApi({action:'commit',token,request:{id:crypto.randomUUID(),kind:'payment',data:{amount:99999999,note:'x'},date:'2026-10-09'}}).uncertain,false);
+ctx.callApi({action:'logout',token});assert.equal(ctx.callApi({action:'snapshot',token}).ok,false);
+assert.equal(locked,false);
+const publicFns=[...fs.readFileSync(__dirname+'/../apps-script/Code.gs','utf8').matchAll(/^function ([a-zA-Z0-9_]+)\(/gm)].map(x=>x[1]).filter(x=>!x.endsWith('_'));
+assert.deepEqual(publicFns,['onOpen','doGet','callApi']);
+console.log('PASS server auth, logout, locks, duplicate retries, ambiguous append/flush, derived-view failure and private admin functions.');

@@ -1,6 +1,6 @@
 /* Bind this project to the imported Supermarket.xlsx Google Sheet. */
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('السوبر ماركت').addItem('تهيئة وربط التطبيق', 'setup_').addItem('تحديث جداول العرض','refreshViews_').addItem('نسخة احتياطية كاملة','backup_').addToUi();
+  SpreadsheetApp.getUi().createMenu('السوبر ماركت').addItem('تهيئة وربط التطبيق', 'setup_').addItem('تغيير اسم المستخدم','setUsername_').addItem('تحديث جداول العرض','refreshViews_').addItem('نسخة احتياطية كاملة','backup_').addToUi();
 }
 function setup_() {
   const ui=SpreadsheetApp.getUi(), props=PropertiesService.getScriptProperties();
@@ -8,16 +8,26 @@ function setup_() {
   if(a.getSelectedButton()!==ui.Button.OK)return;
   const origin=a.getResponseText().trim().replace(/\/$/,'');
   if(!/^https:\/\/[a-zA-Z0-9.-]+(?::\d+)?$/.test(origin))throw new Error('الرابط يجب أن يكون HTTPS دون مسار');
+  const u=ui.prompt('اسم المستخدم','أدخل اسم المستخدم، مثال admin',ui.ButtonSet.OK_CANCEL);
+  if(u.getSelectedButton()!==ui.Button.OK)return;
+  const username=u.getResponseText().trim();if(!username||username.length>80)throw new Error('اسم المستخدم مطلوب وبحد أقصى 80 حرفاً');
   const b=ui.prompt('كلمة مرور التطبيق','اختر كلمة مرور طويلة لا تقل عن 16 حرفاً؛ لا تضعها في ملفات GitHub',ui.ButtonSet.OK_CANCEL);
   if(b.getSelectedButton()!==ui.Button.OK)return;
   const password=b.getResponseText(); if(password.length<16)throw new Error('كلمة المرور قصيرة');
   const salt=Utilities.getUuid();
-  props.setProperties({SHEET_ID:SpreadsheetApp.getActive().getId(),ALLOWED_ORIGIN:origin,PASSWORD_SALT:salt,PASSWORD_HASH:hash_(salt+password),AUTH_VERSION:Utilities.getUuid()});
+  props.setProperties({SHEET_ID:SpreadsheetApp.getActive().getId(),ALLOWED_ORIGIN:origin,USERNAME:username,PASSWORD_SALT:salt,PASSWORD_HASH:hash_(salt+password),AUTH_VERSION:Utilities.getUuid()});
   const ss=db_();
   ss.getSheets().forEach(sh=>sh.setRightToLeft(true));
   ['السجل','المنتجات','الحسابات','الفواتير','بنود الفواتير','السندات','حركة الحسابات','الصندوق'].forEach(name=>{if(!ss.getSheetByName(name))throw new Error('استورد Supermarket.xlsx أولاً؛ الورقة مفقودة: '+name);});
   ss.getSheetByName('السجل').getRange('A1:E1').setValues([['معرف العملية','التاريخ','النوع','الرقم','JSON']]);
   refreshViews_(); ui.alert('اكتملت التهيئة. انشر المشروع كتطبيق ويب ينفذ بصلاحياتك مع وصول Anyone.');
+}
+function setUsername_(){
+  const ui=SpreadsheetApp.getUi(),p=PropertiesService.getScriptProperties();
+  const r=ui.prompt('اسم المستخدم','أدخل الاسم الجديد؛ كلمة المرور الحالية تبقى كما هي',ui.ButtonSet.OK_CANCEL);
+  if(r.getSelectedButton()!==ui.Button.OK)return;
+  const username=r.getResponseText().trim();if(!username||username.length>80)throw new Error('اسم المستخدم مطلوب وبحد أقصى 80 حرفاً');
+  p.setProperties({USERNAME:username,AUTH_VERSION:Utilities.getUuid()});ui.alert('تم تغيير اسم المستخدم وإنهاء الجلسات السابقة.');
 }
 function hash_(value){return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,value).map(b=>(b+256).toString(16).slice(-2)).join('');}
 function db_(){return SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SHEET_ID'));}
@@ -40,10 +50,10 @@ function callApi(req){
       try {
         const failures=Number(cache.get('auth_failures')||0);
         if(failures>=15)throw new Error('محاولات كثيرة؛ انتظر 5 دقائق');
-        if(hash_(p.getProperty('PASSWORD_SALT')+String(req.password||''))!==p.getProperty('PASSWORD_HASH')){cache.put('auth_failures',String(failures+1),300);throw new Error('كلمة المرور غير صحيحة');}
+        if(String(req.username||'').trim()!==(p.getProperty('USERNAME')||'admin')||hash_(p.getProperty('PASSWORD_SALT')+String(req.password||''))!==p.getProperty('PASSWORD_HASH')){cache.put('auth_failures',String(failures+1),300);throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة');}
         cache.remove('auth_failures');const token=Utilities.getUuid()+Utilities.getUuid();
         cache.put('session_'+hash_(token),p.getProperty('AUTH_VERSION'),3600);
-        return {ok:true,token};
+        return {ok:true,token,serverVersion:2};
       }finally{lock.releaseLock();}
     }
     const sessionKey='session_'+hash_(String(req.token||''));
@@ -69,7 +79,7 @@ function callApi(req){
 }
 function safe_(v){return typeof v==='string'&&/^[=+@\-]/.test(v)?"'"+v:v;}
 function table_(name,head,rows){
-  const sh=db_().getSheetByName(name);sh.clearContents();
+  const ss=db_(),sh=ss.getSheetByName(name)||ss.insertSheet(name);sh.clearContents();
   const data=[head].concat(rows).map(r=>r.map(safe_));
   if(sh.getMaxRows()<data.length)sh.insertRowsAfter(sh.getMaxRows(),data.length-sh.getMaxRows());
   sh.getRange(1,1,data.length,head.length).setValues(data);sh.setRightToLeft(true);sh.setFrozenRows(1);
@@ -81,8 +91,12 @@ function views_(s){
   const invoices=s.docs.filter(e=>['sale','purchase'].includes(e.kind));
   table_('الفواتير',['الرقم','التاريخ','النوع','الحساب','قبل الخصم','الخصم','الإجمالي','المدفوع عند الإصدار','المتبقي عند الإصدار','الحالة','ملاحظات'],invoices.map(e=>[e.number,e.date,Market.labels[e.kind],e.data.partyName,e.data.gross,e.data.discount,e.data.total,e.data.paid,e.data.total-e.data.paid,e.voided?'ملغاة':'معتمدة',e.data.note]));
   table_('بنود الفواتير',['رقم الفاتورة','التاريخ','المنتج','الباركود','الكمية','السعر','الإجمالي','الحالة'],invoices.flatMap(e=>e.data.lines.map(l=>[e.number,e.date,l.name,"'"+l.barcode,l.qty,l.price,l.total,e.voided?'ملغاة':'معتمدة'])));
-  table_('السندات',['الرقم','التاريخ','النوع','الحساب','المبلغ','البيان','الحالة'],s.docs.filter(e=>['receipt','payment','opening','void'].includes(e.kind)).map(e=>[e.number,e.date,Market.labels[e.kind],e.data.partyName||'',e.data.amount||0,e.data.note||'',e.voided?'ملغى':'معتمد']));
+  table_('السندات',['الرقم','التاريخ','النوع','الحساب','المبلغ','البيان','الحالة'],s.docs.filter(e=>['receipt','payment','expense','opening','void'].includes(e.kind)).map(e=>[e.number,e.date,Market.labels[e.kind],e.data.partyName||'',e.data.amount||0,e.data.note||'',e.voided?'ملغى':'معتمد']));
   table_('حركة الحسابات',['التاريخ','الحساب','البيان','المرجع','مدين','دائن'],s.ledger.map(x=>[x.date,s.parties[x.partyId].name,x.label,x.ref,x.debit,x.credit]));
+  table_('المصروفات',['الرقم','التاريخ','التصنيف','البيان','المبلغ','الحالة'],s.docs.filter(e=>e.kind==='expense').map(e=>[e.number,e.date,e.data.category,e.data.note,e.data.amount,e.voided?'ملغى':'معتمد']));
+  const profit=Market.profit(s);
+  table_('الأرباح',['التاريخ','المرجع','الحركة','صافي المبيعات','تكلفة المبيعات','المصروفات','صافي الربح','البيان'],profit.rows.map(x=>[x.date,x.ref,x.label,x.revenue,x.cost,x.expense,x.revenue-x.cost-x.expense,[x.category,x.note].filter(Boolean).join(' · ')]));
+  table_('ملخص الأرباح',['البند','المبلغ — ليرة سورية'],[['صافي المبيعات',profit.revenue],['تكلفة البضاعة المباعة',profit.cost],['مجمل الربح',profit.gross],['المصروفات',profit.expenses],['صافي الربح',profit.net],['الفترة','جميع الحركات المسجلة'],['التكلفة','متوسط مخزون متحرك حسب ترتيب التسجيل؛ الإلغاء بتاريخ قيد الإلغاء'],['ملاحظة','سند الدفع العام لا يُحسب مصروفاً تلقائياً؛ لا تشمل الضرائب والإهلاك أو المصروفات غير المسجلة']] );
   let balance=0;table_('الصندوق',['التاريخ','البيان','المرجع','قبض','دفع','الرصيد'],s.cashLedger.map(x=>{balance+=x.delta;return [x.date,x.label,x.ref,Math.max(x.delta,0),Math.max(-x.delta,0),balance];}));
 }
 function refreshViews_(){const l=LockService.getScriptLock();l.waitLock(20000);try{views_(Market.state(events_()));}finally{l.releaseLock();}}

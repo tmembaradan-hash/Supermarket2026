@@ -6,3 +6,7 @@
 @media(max-width:760px){.hero .amount{white-space:nowrap;font-family:Arial,sans-serif;font-size:29px}.hero .amount span{display:block;font-size:11px;line-height:1.8;letter-spacing:0}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stats .card:first-child{grid-column:1/-1}.stat-value{white-space:nowrap;overflow-wrap:normal;font-family:Arial,sans-serif;font-size:23px}.stats .card:first-child .stat-top{font-size:12px}.stats .fine{font-size:10px}.stats .card{padding:14px}}
 
 @media(max-width:760px){.hero{flex-direction:column}.hero-actions{flex-direction:row;width:100%}.hero-actions button{flex:1}.hero .amount{font-size:28px}.stat-value{font-size:var(--money-size,23px)}}
+
+/* Profit report and extra mobile quick action. */
+.profit-stats{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin:18px 0}.profit-stats .stat-value{font-size:22px;overflow-wrap:anywhere}.pill-tabs{flex-wrap:wrap}.quick-actions{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+@media(max-width:600px){.profit-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.profit-stats .card:last-child{grid-column:1/-1}.profit-stats .stat-value{font-size:19px}.quick-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}

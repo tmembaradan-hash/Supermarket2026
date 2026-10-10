@@ -1,0 +1,43 @@
+const assert=require('node:assert/strict');
+const {randomUUID}=require('node:crypto');
+const M=require('../engine.js');
+let events=[],tests=0;
+const meta={today:'2026-10-09',now:'2026-10-09T12:00:00.000Z'};
+function commit(kind,data,date=meta.today){const e=M.prepare(events,{kind,data,date,id:randomUUID()},meta);events.push(e);return e;}
+function test(name,fn){fn();tests++;console.log('PASS '+name);}
+function request(kind,data){return {kind,data,id:randomUUID(),date:meta.today};}
+const opening=commit('opening',{amount:1000000});
+const product=commit('product',{name:'منتج',barcode:'0012345678905',unit:'قطعة',cost:10000,price:15000,openingQty:10,minStock:2}).data.id;
+const supplier=commit('party',{name:'المورد',type:'supplier',openingAmount:100000,openingDirection:'us'}).data.id;
+const customer=commit('party',{name:'الزبون',type:'customer',openingAmount:50000,openingDirection:'them'}).data.id;
+test('opening cash and balances do not double count',()=>{const s=M.state(events);assert.equal(s.cash,1000000);assert.equal(s.parties[supplier].balance,-100000);assert.equal(s.parties[customer].balance,50000);});
+const purchase=commit('purchase',{lines:[{productId:product,qty:20,price:10000}],discount:0,paid:60000,partyId:supplier});
+test('partial purchase: cash, payable and stock',()=>{const s=M.state(events);assert.equal(s.cash,940000);assert.equal(s.products[product].stock,30);assert.equal(s.parties[supplier].balance,-240000);});
+const sale=commit('sale',{lines:[{productId:product,qty:3,price:15000}],discount:5000,paid:10000,partyId:customer});
+test('discounted credit sale: cash, receivable and stock',()=>{const s=M.state(events);assert.equal(s.cash,950000);assert.equal(s.products[product].stock,27);assert.equal(s.parties[customer].balance,80000);});
+commit('receipt',{amount:30000,partyId:customer});commit('payment',{amount:40000,partyId:supplier});
+test('receipts and payments settle balances',()=>{const s=M.state(events);assert.equal(s.cash,940000);assert.equal(s.parties[customer].balance,50000);assert.equal(s.parties[supplier].balance,-200000);});
+commit('payment',{amount:5000,note:'كهرباء'});
+test('legacy general payments reduce only cash',()=>{const s=M.state(events);assert.equal(s.cash,935000);assert.equal(s.parties[customer].balance,50000);});
+test('same request ID returns same event',()=>{const e=M.prepare(events,{id:sale.id,kind:sale.kind,data:sale.data,date:sale.date},meta);assert.equal(e,sale);});
+test('barcode leading zero survives',()=>assert.equal(M.state(events).products[product].barcode,'0012345678905'));
+test('duplicate barcode rejected',()=>assert.throws(()=>M.prepare(events,request('product',{name:'x',barcode:'0012345678905',cost:0,price:0}),meta),/باركود/));
+test('aggregate repeated product lines cannot oversell',()=>assert.throws(()=>M.prepare(events,request('sale',{lines:[{productId:product,qty:20,price:1},{productId:product,qty:20,price:1}],paid:40}),meta),/الرصيد غير كاف/));
+test('overpayment rejected',()=>assert.throws(()=>M.prepare(events,request('sale',{lines:[{productId:product,qty:1,price:10}],paid:11}),meta),/المدفوع أكبر/));
+test('credit sale requires customer',()=>assert.throws(()=>M.prepare(events,request('sale',{lines:[{productId:product,qty:1,price:10}],paid:0}),meta),/اختر الزبون/));
+test('wrong party type rejected',()=>assert.throws(()=>M.prepare(events,request('sale',{lines:[{productId:product,qty:1,price:10}],paid:0,partyId:supplier}),meta),/نوع الحساب/));
+test('negative and non-finite money rejected',()=>{for(const amount of [-1,Infinity,NaN,0.5])assert.throws(()=>M.money(amount));});
+test('precision beyond 3 quantity decimals rejected',()=>assert.throws(()=>M.qty(1.0001)));
+test('future and invalid dates rejected',()=>{for(const date of ['2026-10-10','2026-02-30'])assert.throws(()=>M.prepare(events,{...request('receipt',{amount:1,note:'x'}),date},meta));});
+test('cash underflow rejected',()=>assert.throws(()=>M.prepare(events,request('payment',{amount:999999999,note:'x'}),meta),/لا يكفي/));
+test('opening cash cannot be added twice',()=>assert.throws(()=>M.prepare(events,request('opening',{amount:10}),meta),/مرة واحدة/));
+test('edits preserve stock and opening balance',()=>{commit('product',{id:product,name:'اسم جديد',barcode:'0012345678905',price:17000,cost:11000,openingQty:999});commit('party',{id:customer,name:'زبون معدل',type:'customer',openingAmount:999999,openingDirection:'us'});const s=M.state(events);assert.equal(s.products[product].stock,27);assert.equal(s.parties[customer].balance,50000);});
+test('statement reconciles opening plus debits minus credits',()=>{const s=M.state(events),r=M.statement(s,customer,'2026-10-09','2026-10-09');assert.equal(r.opening+r.rows.reduce((a,x)=>a+x.debit-x.credit,0),r.closing);assert.equal(r.closing,s.parties[customer].balance);const next=M.statement(s,customer,'2026-10-10','2026-10-31');assert.equal(next.opening,50000);assert.equal(next.closing,50000);assert.equal(next.rows.length,0);});
+test('void sale creates reversing entries and preserves original',()=>{const before=M.state(events);commit('void',{targetId:sale.id,note:'خطأ'});const s=M.state(events);assert.equal(s.cash,before.cash-10000);assert.equal(s.products[product].stock,30);assert.equal(s.parties[customer].balance,20000);assert.ok(s.docs.find(x=>x.id===sale.id).voided);assert.equal(M.statement(s,customer).closing,20000);});
+test('double void rejected',()=>assert.throws(()=>M.prepare(events,request('void',{targetId:sale.id,note:'x'}),meta),/غير قابلة/));
+commit('sale',{lines:[{productId:product,qty:25,price:10000}],paid:250000});
+test('cannot void purchase after goods consumed',()=>assert.throws(()=>M.prepare(events,request('void',{targetId:purchase.id,note:'x'}),meta),/تم بيعها/));
+test('fractional quantity gives whole SYP line amount',()=>{const e=commit('sale',{lines:[{productId:product,qty:0.125,price:13}],paid:2});assert.equal(e.data.total,2);assert.equal(M.state(events).products[product].stock,4.875);});
+test('cash report and account reports reconcile with state',()=>{const s=M.state(events);assert.equal(s.cashLedger.reduce((a,x)=>a+x.delta,0),s.cash);Object.values(s.parties).forEach(p=>assert.equal(M.statement(s,p.id).closing,p.balance));});
+test('prototype-key injection rejected',()=>assert.throws(()=>M.prepare(events,request('product',{id:'__proto__',name:'x',cost:1,price:1}),meta),/معرف/));
+console.log(`${tests} accounting checks passed.`);
