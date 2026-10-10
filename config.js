@@ -1,2 +1,5 @@
-https://script.google.com/macros/s/AKfycbx_w8ZDsaShD8TaksQcHwZXHBlV-UfuNIs3dpxT7rolfzHH7lTOpMmEgamP9MV3x_la/exec
-window.MARKET_CONFIG = { scriptUrl: '', storeName: 'سوبر ماركت' };
+// Public Apps Script deployment URL. Never put passwords here.
+window.MARKET_CONFIG = {
+  scriptUrl: 'https://script.google.com/macros/s/AKfycbxmGwHhM_JAJXrwN5yykHBo9TDPftVXsK0ITsTydaSfRUE741bPAslJZQDbstg7v74/exec',
+  storeName: 'سوبر ماركت'
+};
