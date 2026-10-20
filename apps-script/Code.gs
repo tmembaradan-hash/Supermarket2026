@@ -4,23 +4,30 @@ function onOpen() {
 }
 function setup_() {
   const ui=SpreadsheetApp.getUi(), props=PropertiesService.getScriptProperties();
-  const a=ui.prompt('رابط موقعك','أدخل أصل GitHub Pages فقط، مثل https://username.github.io دون اسم المستودع',ui.ButtonSet.OK_CANCEL);
-  if(a.getSelectedButton()!==ui.Button.OK)return;
-  const origin=a.getResponseText().trim().replace(/\/$/,'');
-  if(!/^https:\/\/[a-zA-Z0-9.-]+(?::\d+)?$/.test(origin))throw new Error('الرابط يجب أن يكون HTTPS دون مسار');
-  const u=ui.prompt('اسم المستخدم','أدخل اسم المستخدم، مثال admin',ui.ButtonSet.OK_CANCEL);
-  if(u.getSelectedButton()!==ui.Button.OK)return;
-  const username=u.getResponseText().trim();if(!username||username.length>80)throw new Error('اسم المستخدم مطلوب وبحد أقصى 80 حرفاً');
-  const b=ui.prompt('كلمة مرور التطبيق','اختر كلمة مرور طويلة لا تقل عن 16 حرفاً؛ لا تضعها في ملفات GitHub',ui.ButtonSet.OK_CANCEL);
-  if(b.getSelectedButton()!==ui.Button.OK)return;
-  const password=b.getResponseText(); if(password.length<16)throw new Error('كلمة المرور قصيرة');
-  const salt=Utilities.getUuid();
-  props.setProperties({SHEET_ID:SpreadsheetApp.getActive().getId(),ALLOWED_ORIGIN:origin,USERNAME:username,PASSWORD_SALT:salt,PASSWORD_HASH:hash_(salt+password),AUTH_VERSION:Utilities.getUuid()});
-  const ss=db_();
-  ss.getSheets().forEach(sh=>sh.setRightToLeft(true));
-  ['السجل','المنتجات','الحسابات','الفواتير','بنود الفواتير','السندات','حركة الحسابات','الصندوق'].forEach(name=>{if(!ss.getSheetByName(name))throw new Error('استورد Supermarket.xlsx أولاً؛ الورقة مفقودة: '+name);});
-  ss.getSheetByName('السجل').getRange('A1:E1').setValues([['معرف العملية','التاريخ','النوع','الرقم','JSON']]);
-  refreshViews_(); ui.alert('اكتملت التهيئة. انشر المشروع كتطبيق ويب ينفذ بصلاحياتك مع وصول Anyone.');
+  const sheetId='16EBzeuIR6Jeaoq_RJ2O0GqpXcMPmrT9n6NcTApHD4bA';
+  const origin='https://tmembaradan-hash.github.io';
+  const oldSheet=props.getProperty('SHEET_ID');
+  if(oldSheet&&oldSheet!==sheetId)throw new Error('هذا المشروع مهيأ لشيت آخر. توقف وتحقق من مشروع Apps Script قبل المتابعة.');
+  const ss=SpreadsheetApp.openById(sheetId);
+  const required=['السجل','المنتجات','الحسابات','الفواتير','بنود الفواتير','السندات','حركة الحسابات','الصندوق'];
+  required.forEach(name=>{if(!ss.getSheetByName(name))throw new Error('ورقة البيانات المطلوبة غير موجودة: '+name);});
+  let credentials={};
+  if(!props.getProperty('PASSWORD_HASH')||!props.getProperty('PASSWORD_SALT')){
+    const b=ui.prompt('كلمة مرور التطبيق','اختر كلمة مرور جديدة لا تقل عن 16 حرفاً؛ هذه تهيئة أولى فقط',ui.ButtonSet.OK_CANCEL);
+    if(b.getSelectedButton()!==ui.Button.OK)return;
+    const password=b.getResponseText();
+    if(password.length<16)throw new Error('كلمة المرور تحتاج إلى 16 حرفاً على الأقل');
+    const salt=Utilities.getUuid();
+    credentials={PASSWORD_SALT:salt,PASSWORD_HASH:hash_(salt+password)};
+  }
+  const lock=LockService.getScriptLock();lock.waitLock(20000);
+  try{
+    props.setProperties({SHEET_ID:sheetId,ALLOWED_ORIGIN:origin,USERNAME:props.getProperty('USERNAME')||'admin',...credentials,AUTH_VERSION:Utilities.getUuid()});
+    ss.getSheets().forEach(sh=>sh.setRightToLeft(true));
+    ss.getSheetByName('السجل').getRange('A1:E1').setValues([['معرف العملية','التاريخ','النوع','الرقم','JSON']]);
+    views_(Market.state(events_()));
+  }finally{lock.releaseLock();}
+  ui.alert('اكتملت التهيئة. اسم المستخدم: '+props.getProperty('USERNAME')+'\nكلمة المرور الحالية محفوظة. حدّث النشر القائم إلى إصدار جديد، ثم افتح موقع المتجر.');
 }
 function setUsername_(){
   const ui=SpreadsheetApp.getUi(),p=PropertiesService.getScriptProperties();
@@ -36,7 +43,7 @@ function doGet(e){
   const props=PropertiesService.getScriptProperties();
   const nonce=String(e.parameter.nonce||''); if(!/^[a-zA-Z0-9-]{16,80}$/.test(nonce))return HtmlService.createHtmlOutput('افتح التطبيق من رابط GitHub Pages.');
   const t=HtmlService.createTemplateFromFile('Bridge');
-  t.origin=JSON.stringify(props.getProperty('ALLOWED_ORIGIN')||'');t.nonce=JSON.stringify(nonce);
+  t.origin=JSON.stringify(props.getProperty('ALLOWED_ORIGIN')||'https://tmembaradan-hash.github.io');t.nonce=JSON.stringify(nonce);
   return t.evaluate().setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 function callApi(req){

@@ -132,7 +132,18 @@ function renderInvoice(){
 }
 function itemResults(q){$('#item-results').innerHTML=q?Object.values(state.products).filter(p=>p.name.includes(q)||p.barcode.includes(q)).slice(0,8).map(p=>`<button type="button" data-a="add-item" data-id="${p.id}"><span>${esc(p.name)}<small class="muted">المتوفر: ${number(p.stock)}</small></span><b>${cash(invoiceKind==='sale'?p.price:p.cost)}</b></button>`).join(''):'';}
 function addItem(id){const p=state.products[id];if(!p)return;const l=cart.find(x=>x.productId===id);if(l)l.qty=Market.qty(l.qty+1);else cart.push({productId:id,qty:1,price:invoiceKind==='sale'?p.price:p.cost});$('#item-query').value='';$('#item-results').innerHTML='';renderCart();}
-function lookupBarcode(code){const p=Object.values(state.products).find(p=>p.barcode===englishDigits(code).trim());if(p)addItem(p.id);else toast('الباركود غير مسجل. أضف المنتج أولاً من المنتجات.',true);}
+function barcodeKey(value){
+  const code=englishDigits(value).trim();
+  if(!/^\d{12,13}$/.test(code))return code;
+  let sum=0;for(let i=code.length-2,weight=3;i>=0;i--,weight=4-weight)sum+=Number(code[i])*weight;
+  if((10-sum%10)%10!==Number(code[code.length-1]))return code;
+  return code.length===12?'0'+code:code;
+}
+function findBarcodeProduct(code){
+  const normalized=englishDigits(code).trim(),products=Object.values(state.products);
+  return products.find(p=>p.barcode===normalized)||products.find(p=>barcodeKey(p.barcode)===barcodeKey(normalized));
+}
+function lookupBarcode(code){const p=findBarcodeProduct(code);if(p)addItem(p.id);else toast('الباركود غير مسجل. أضف المنتج أولاً من المنتجات.',true);}
 function renderCart(){
   $('#cart').innerHTML=cart.length?cart.map((l,i)=>`<div class="cart-row"><div><b>${esc(state.products[l.productId].name)}</b><small>${cash(Math.round(l.qty*l.price))}</small></div><label>الكمية<input ${numericAttrs(true)} data-cart="qty" data-index="${i}" value="${l.qty||''}" min="0.001" step="0.001" required></label><label>سعر الوحدة<input ${numericAttrs()} data-cart="price" data-index="${i}" value="${l.price||''}" min="0" step="1" required></label><button type="button" data-a="remove-item" data-index="${i}" aria-label="حذف البند">×</button></div>`).join(''):empty('الفاتورة فارغة.<br>امسح باركود المنتج أو ابحث عنه لإضافته.');
   document.querySelectorAll('[data-cart]').forEach(input=>input.addEventListener('input',e=>{const i=Number(e.target.dataset.index);cart[i][e.target.dataset.cart]=Number(e.target.value);e.target.closest('.cart-row').querySelector('small').textContent=cash(Math.round(cart[i].qty*cart[i].price));invoiceTotals();}));invoiceTotals();
